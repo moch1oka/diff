@@ -1,6 +1,6 @@
 import subsrt from 'subsrt'
 import { createTwoFilesPatch } from 'diff'
-import { toJpeg } from 'html-to-image'
+import { exportDiffImage } from './export'
 // The plain renderer, not Diff2HtmlUI: the UI wrapper pulls in all of highlight.js,
 // and we don't use syntax highlighting
 import { html as diffToHtml } from 'diff2html'
@@ -8,16 +8,49 @@ import type { LineMatchingType, OutputFormatType } from 'diff2html/lib/types'
 import 'diff2html/bundles/css/diff2html.min.css'
 import './main.css' // after diff2html's CSS so our overrides win
 
-document.getElementById('jpgexport').addEventListener('click', () => {
-  // JPEG has no alpha channel, so give the (transparent) diff container the page background
-  toJpeg(document.getElementById('diff'), { quality: 0.95, backgroundColor: '#2a2a2a' })
-    .then(dataUrl => {
-      const link = document.createElement('a')
-      link.download = 'evadiff.jpg'
-      link.href = dataUrl
-      link.click()
-    })
-})
+const exportAllBtn = document.getElementById('export-all') as HTMLButtonElement
+const exportSelectionBtn = document.getElementById('export-selection') as HTMLButtonElement
+let exporting = false
+
+function selectedLineCount (): number {
+  const tbody = document.querySelector('#diff .d2h-diff-tbody')
+  return tbody ? tbody.querySelectorAll(':scope > tr.highlight').length : 0
+}
+
+function updateExportButtons () {
+  const count = selectedLineCount()
+  exportAllBtn.disabled = exporting
+  exportSelectionBtn.disabled = exporting || count === 0
+  if (!exporting) {
+    exportSelectionBtn.textContent = count > 0
+      ? `Export selection (${count} ${count === 1 ? 'line' : 'lines'})`
+      : 'Export selection'
+  }
+}
+
+async function runExport (button: HTMLButtonElement, selectionOnly: boolean) {
+  if (exporting) return
+  exporting = true
+  const label = button.textContent
+  button.textContent = 'Exporting...'
+  updateExportButtons()
+  // Let the button state paint before the (synchronous) layout work starts
+  await new Promise(resolve => setTimeout(resolve, 0))
+  try {
+    const images = await exportDiffImage(document.getElementById('diff'), selectionOnly, selectionOnly ? 'evadiff-selection' : 'evadiff')
+    if (images > 1) showStatus(`The diff was too tall for one image, saved it as ${images} images.`, 8000)
+  } catch (error) {
+    console.error(error)
+    showStatus('Image export failed: ' + error.message, 8000)
+  } finally {
+    exporting = false
+    button.textContent = label
+    updateExportButtons()
+  }
+}
+
+exportAllBtn.addEventListener('click', () => runExport(exportAllBtn, false))
+exportSelectionBtn.addEventListener('click', () => runExport(exportSelectionBtn, true))
 
 const input = document.querySelector('input')
 const droparea = document.querySelector('.file-drop-area')
@@ -377,6 +410,7 @@ function diffUpdate () {
     emptyLine.innerHTML = '<del>' + emptyLine.innerHTML + '</del>'
   })
   document.getElementById('afterdiff').style.display = 'block'
+  updateExportButtons()
 }
 
 // Side by side: scrolling one pane horizontally scrolls the other (what Diff2HtmlUI's synchronisedScroll did)
@@ -410,12 +444,12 @@ document.getElementById('diff').addEventListener('click', (e: MouseEvent) => {
     const from = Math.min(line, highlighted[0])
     const to = Math.max(line, highlighted[highlighted.length - 1])
     for (let i = from; i <= to; i++) rowsAt(i).forEach(r => r.classList.add('highlight'))
-    return
+  } else {
+    const wasOnlyThisLine = highlighted.length === 1 && highlighted[0] === line
+    tbodies.forEach(tbody => Array.from(tbody.children).forEach(r => r.classList.remove('highlight')))
+    if (!wasOnlyThisLine) rowsAt(line).forEach(r => r.classList.add('highlight'))
   }
-
-  const wasOnlyThisLine = highlighted.length === 1 && highlighted[0] === line
-  tbodies.forEach(tbody => Array.from(tbody.children).forEach(r => r.classList.remove('highlight')))
-  if (!wasOnlyThisLine) rowsAt(line).forEach(r => r.classList.add('highlight'))
+  updateExportButtons()
 })
 
 // Fast non-cryptographic 53-bit hash (cyrb53), only used to skip files that were already added

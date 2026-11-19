@@ -306,6 +306,27 @@ select {
   max-width: 90vw;
 }
 
+#afterdiff {
+  margin-top: 1em;
+  text-align: center;
+}
+
+#afterdiff .fake-btn {
+  cursor: pointer;
+  margin: 0.25em;
+}
+
+#afterdiff .fake-btn:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.export-hint {
+  margin-top: 0.6em;
+  font-size: small;
+  opacity: 0.7;
+}
+
 .swap-btn {
   cursor: pointer;
   margin: 0.5em;
