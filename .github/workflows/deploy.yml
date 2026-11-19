@@ -20,21 +20,20 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # Parcel 1 (and its native deps like deasync) don't build on recent Node versions
       - uses: actions/setup-node@v5
         with:
-          node-version: 16
+          node-version: 22
           cache: npm
 
-      # package-lock.json pins two GitHub dependencies over SSH; the runner has no SSH key
+      # package-lock.json pins subsrt (a GitHub dependency) over SSH; the runner has no SSH key
       - name: Fetch GitHub dependencies over HTTPS
         run: |
           git config --global url."https://github.com/".insteadOf ssh://git@github.com/
           git config --global --add url."https://github.com/".insteadOf git@github.com:
 
-      # Not `npm ci`: the committed lock file is slightly out of sync with package.json
-      # (missing nan), which npm ci rejects. npm install keeps the locked versions and fills the gap.
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
+      # Typecheck + lint
+      - run: npm test
       - run: npm run build
 
       - uses: actions/configure-pages@v5

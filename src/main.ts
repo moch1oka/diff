@@ -1,30 +1,32 @@
-import 'regenerator-runtime/runtime'
-import fileReaderStream from 'filereader-stream'
 import subsrt from 'subsrt'
-import difflib from 'difflib'
-import crypto from 'crypto'
-const { SubtitleParser } = require('matroska-subtitles')
-import { toJpeg } from 'html-to-image';
+import { createTwoFilesPatch } from 'diff'
+import { toJpeg } from 'html-to-image'
+// The plain renderer, not Diff2HtmlUI: the UI wrapper pulls in all of highlight.js,
+// and we don't use syntax highlighting
+import { html as diffToHtml } from 'diff2html'
+import type { LineMatchingType, OutputFormatType } from 'diff2html/lib/types'
+import 'diff2html/bundles/css/diff2html.min.css'
+import './main.css' // after diff2html's CSS so our overrides win
 
-document.getElementById('jpgexport').addEventListener('click', e => {
+document.getElementById('jpgexport').addEventListener('click', () => {
   // JPEG has no alpha channel, so give the (transparent) diff container the page background
   toJpeg(document.getElementById('diff'), { quality: 0.95, backgroundColor: '#2a2a2a' })
-  .then(function (dataUrl) {
-    var link = document.createElement('a');
-    link.download = 'evadiff.jpg';
-    link.href = dataUrl;
-    link.click();
-  });
+    .then(dataUrl => {
+      const link = document.createElement('a')
+      link.download = 'evadiff.jpg'
+      link.href = dataUrl
+      link.click()
+    })
 })
 
 const input = document.querySelector('input')
 const droparea = document.querySelector('.file-drop-area')
-const statusEl = document.querySelector('.file-msg')
+const statusEl = document.querySelector<HTMLElement>('.file-msg')
 const statusInit = statusEl.textContent
 const diffFiles = {}
 // excludedStyles and replacements are keyed by file hash, so they stay with the file when A/B are swapped
-const diffOptions = { fileA: null, fileB: null, excludedStyles: {}, replacements: {}, sortByTime: false, stripTags: true, removeEmptyLines: true, normalizeWhitespace: true, normalizeCharacters: true, removePosLines: true, removeDrawLines: true, mergeDuplicateLines: true, mergeAlphaTiming: false, removeSpecialCharacters: false, ignorePunctuation: false, ignoreHonorifics: false, removeHonorifics: false, lowerCase: false, diffMatching: 'words', diffOutputFormat: 'side-by-side' }
-const checkboxOptions = { /*sortByTime: 'Sort by time',*/ stripTags: 'Strip tags', removeEmptyLines: 'Remove empty lines', normalizeWhitespace: 'Normalize whitespace', normalizeCharacters: 'Normalize characters', removePosLines: 'Remove \\pos lines', removeDrawLines: 'Remove \\p (drawing) lines', mergeDuplicateLines: 'Merge duplicate lines', mergeAlphaTiming: 'Merge alpha timing', removeSpecialCharacters: 'Remove special characters', removeHonorifics: 'Remove honorifics', lowerCase: 'Convert to lowercase', ignorePunctuation: 'Ignore punctuation changes', ignoreHonorifics: 'Ignore honorific changes' }
+const diffOptions = { fileA: null, fileB: null, excludedStyles: {}, replacements: {}, sortByTime: false, stripTags: true, removeEmptyLines: true, normalizeWhitespace: true, normalizeCharacters: true, removePosLines: true, removeDrawLines: true, mergeDuplicateLines: true, mergeAlphaTiming: false, removeSpecialCharacters: false, ignorePunctuation: false, ignoreHonorifics: false, removeHonorifics: false, lowerCase: false, diffMatching: 'words' as LineMatchingType, diffOutputFormat: 'side-by-side' as OutputFormatType }
+const checkboxOptions = { /* sortByTime: 'Sort by time', */ stripTags: 'Strip tags', removeEmptyLines: 'Remove empty lines', normalizeWhitespace: 'Normalize whitespace', normalizeCharacters: 'Normalize characters', removePosLines: 'Remove \\pos lines', removeDrawLines: 'Remove \\p (drawing) lines', mergeDuplicateLines: 'Merge duplicate lines', mergeAlphaTiming: 'Merge alpha timing', removeSpecialCharacters: 'Remove special characters', removeHonorifics: 'Remove honorifics', lowerCase: 'Convert to lowercase', ignorePunctuation: 'Ignore punctuation changes', ignoreHonorifics: 'Ignore honorific changes' }
 const selectOptions = {
   diffOutputFormat: { label: 'Layout', choices: { 'side-by-side': 'Side by side', 'line-by-line': 'Unified' } },
   diffMatching: { label: 'Matching', choices: { words: 'Words', lines: 'Lines', none: 'None' } }
@@ -33,20 +35,20 @@ const selectOptions = {
 const opts = document.getElementById('globalopt')
 for (const option in checkboxOptions) {
   const label = document.createElement('label')
-  label.htmlFor = 'chk-'+option
+  label.htmlFor = 'chk-' + option
   label.textContent = checkboxOptions[option]
   label.classList.add('fileinfo')
   const opt = document.createElement('div')
-  opt.id = 'opt-'+option
+  opt.id = 'opt-' + option
   opt.classList.add('option')
   const chk = document.createElement('input')
-  chk.id = 'chk-'+option
+  chk.id = 'chk-' + option
   chk.type = 'checkbox'
   chk.checked = diffOptions[option]
   label.appendChild(opt)
   opt.appendChild(chk)
-  chk.addEventListener('change', ck => {
-    diffOptions[option] = ck.target.checked
+  chk.addEventListener('change', () => {
+    diffOptions[option] = chk.checked
     diffUpdate()
   })
   opts.appendChild(label)
@@ -74,7 +76,7 @@ for (const option in selectOptions) {
   opts.appendChild(label)
 }
 
-function clearStatus() {
+function clearStatus () {
   statusEl.textContent = statusInit
 }
 
@@ -87,10 +89,10 @@ function showStatus (message: string, timeout = 4000) {
 }
 
 // Matches a {...} override block containing \r or \rStyleName
-const resetTagRegex = /\{[^\}]*\\r([^\\\}]*)[^\}]*\}/g
+const resetTagRegex = /\{[^}]*\\r([^\\}]*)[^}]*\}/g
 
 function stripAssTags (text: string): string {
-  return text.replace(/\{[^\}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3})[^\}]*\}.*?\{[^\}]*\\p0.*?(?<!\\p1)\}|\{[^\}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3}).*$/g, '').replace(/\{[^\}]*\}/g, '').replace(/\\h/g, ' ').replace(/\s?\\n\s?/g, ' ').replace(/\s?\\N\s?/g, '\r\n')
+  return text.replace(/\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3})[^}]*\}.*?\{[^}]*\\p0.*?(?<!\\p1)\}|\{[^}]*\\p(?:0+[1-9]|[1-9]{1}\d{0,3}).*$/g, '').replace(/\{[^}]*\}/g, '').replace(/\\h/g, ' ').replace(/\s?\\n\s?/g, ' ').replace(/\s?\\N\s?/g, '\r\n')
 }
 
 // Keeps only the parts of an ASS line whose effective style (the line's own style,
@@ -129,11 +131,11 @@ function collectStyles (parsed): Map<string, number> {
   return styles
 }
 
-function handleLines(data, options): string[] {
+function handleLines (data, options): string[] {
   const lines: string[] = []
   // TODO: sortByTime
   data.forEach(line => {
-    if (line.type != 'caption') return
+    if (line.type !== 'caption') return
 
     let text = options.stripTags ? line.text : line.content
 
@@ -147,8 +149,8 @@ function handleLines(data, options): string[] {
       }
     }
 
-    if (options.removePosLines && /\{[^\}]*\\pos/.test(line.content)) return
-    if (options.removeDrawLines && /\{[^\}]*\\p[0-9 .\-\\\}]/.test(line.content)) return
+    if (options.removePosLines && /\{[^}]*\\pos/.test(line.content)) return
+    if (options.removeDrawLines && /\{[^}]*\\p[0-9 .\-\\}]/.test(line.content)) return
 
     if (options.removeEmptyLines && text.replace(/\xa0/g, ' ').trim() === '') return
 
@@ -157,7 +159,7 @@ function handleLines(data, options): string[] {
     }
 
     if (options.removeSpecialCharacters) {
-      text = text.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()…?–—]/g, '')
+      text = text.replace(/[.,/#!$%^&*;:{}=\-_`~()…?–—]/g, '')
     }
 
     if (options.removeHonorifics) {
@@ -190,17 +192,17 @@ function handleLines(data, options): string[] {
   return lines
 }
 
-function guessGroup(filename) {
+function guessGroup (filename) {
   const discordStyle = filename.match(/^([A-Za-z0-9-]+)_[A-Za-z_]+_-_(?:[Ss]\d+)?[Ee]?\d+[_.]/)
   if (discordStyle) return discordStyle[1]
 
-  const groupBlacklist = ['xvid', 'x264', 'x265', 'avc', 'hevc', 'dvd', 'dvd5', 'dvd9', 'dvdiso', 'dvd-r', 'dvdr', 'movie', '4k', '2160p', '1080p', '720p', '576p', '480p', '2160', '1080', '720', '576', '480', 'bluray', 'bdmv', 'bdiso', 'proper', 'aac', 'ac3', 'flac', 'vob', 'ifo', 'vob ifo', 'vob.ifo', 'vob_ifo', 'avi', 'remux', 'uncut', 'dl', 'us', 'r', 'j', 'jp', 'jpn', 'ita', 'dvdrip', 'pal', 'ntsc', 'bd', 'bdremux', 'bdremux.1080p', '1080p remux', 'hd', 'eng', 'exclusive', 'japanese', 'nogrp', 'nogroup', '3d half sbs', 'r1', 'r2', 'r2j', 'extras', 'trailers', 'rifftrax', 'cd1', 'cd2'];
-  const groupRegex = /^\[(?!Japanese)(?:[0-9]+[pP]?|MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|([^[\u4E00-\u9FCC¶^\]]+))\](?!\[).*|^\[(?!Japanese)(?:MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|\d{6}|([^½ \]\u4E00-\u9FCC]+))\].*|.*[a-zA-Z .\]]\[(?:.* Edition|[rR]iff[tT]rax|REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|R).*|BD(?:MV|\d+)|AC3|AAC|.* DVD|[0-9]+[pP]?|.*?26[45]+.*?|[a-f0-9]{8}|[A-F0-9]{8}|.*FLAC|R2[ JFD].*|([^[)+-]+))](?:\[[0-9]+[pP]])$|.*(?:\.|[xhXH]\.?26[45] )(?:REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|-?R)?|BD(?:MV|\d+)|AC3|AAC|FLAC|PAL|NTSC|XVID|DTS|DUB|[xhXH]\.?26[45]|(?![cC][dD]\d|BLURAY)([A-Z]-)?([A-Z][A-Zi0-9]+|[A-Z][a-z][A-Z]|@[a-zA-Z]{2,}))$|^(lazers|neroz)-[a-z0-9-]+$|^([a-z]{3,4}|refined|publichd)(?:-[a-z0-9-]*|(?:\.EXTRAS)?\.[a-z0-9.]*)\.?(?:2160|1080|720|480)p?$|.*(?:WEB-DL|10-bit|(?:_-_|(?:[ \d]- )(?!DTS-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|WB|[xhXH]\.?26[45]|[aA][vV][iI]|Uncut|Untouched|DVDRIP|Extras|Trailers|Copy|[rR]iff[tT]rax|[a-z]*1080p|[([]?\d+|[bB][iI]|[cC][dD]\d|([^ .\])_~]+)))\)?$|.*(?:WEB-DL|10-bit|(?:_-_|(?:-([A-Z][A-Z0-9]-)|...-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|[xhXH]\.?26[45]|Uncut|Untouched|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|([^ .\])]+)))-Exclusive\)?$|.*(?:[bB]lu-[rR]ay|WEB-DL|10-bit|(?:_-_|(?:S-([A-WYZ][A-Z0-9]?-)|[^S]-([A-Z][A-Z0-9]?-)|(FTW-)|.(?!BD-[JKR][)\]]?$).(?!3-D$).-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|X|[xhXH]\.?26[45]|Uncut|Untouched|[mM]ovie|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|\[([A-Z]+|[a-z]+)]|((?:[A-Z]\.?)+|[^ .\])]+(?:\[\d+])?)))\)?$|.*(?:[bB]lu-[rR]ay|WEB-DL|10-bit|(?:_-_|(?:S-([A-WYZ][A-Z0-9]?-)|[^S]-([A-Z][A-Z0-9]?-)|(FTW-)|.(?!BD-[JKR][)\]]?$).(?!3-D$).-|~))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|X|[xhXH]\.?26[45]|Uncut|Untouched|[mM]ovie|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|\[([A-Z]+|[a-z]+)]|((?:[A-Z]\.?)+|[^ .\])]+(?:\[\d+])?)))\)?$|^[a-z]{3}_\[(?:[0-9]+[pP]?|MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|([^[\u4E00-\u9FCC]+))\]|^([a-z]{2,3})\..*|.*?(?:\[((?:[A-Z]{3}-)?[A-Z][a-z]{3,})\]) ?\[(?:[a-f0-9]{8}|[A-F0-9]{8})]$|(?!DVD-R).*[a-zA-Z .\]]\[(?:.* Edition|[rR]iff[tT]rax|REMUX|PROPER|MOVIE|PAL|(?:PAL.)?DVD(?:[95]|ISO|R).*|BD(?:MV|\d+)|AC3|AAC|.* DVD|[0-9]+[pP]?|.*?26[45]+.*?|[a-f0-9]{8}|[A-F0-9]{8}|.*FLAC|Eng|Ita|R\d(?:J|FR)?|.*DVD\.XviD|VOB.IFO|R2[ JFD].*|EXTRAS.*|\d+p [rR]emux|.*, \d{4}|([^[)+-]+))]$|^([a-z]+)-.*(?:[0-9]+[pP]?$)|^[a-z]{2}-([a-z]{3})$|^(?:[A-Z_]|3D)+_(?:REMUX|BLURAY|([A-Zi]{2,4}HD|HD[A-Z]{4}))$|.*\d\.\d ([a-z]{4}|[A-Z][a-z]+[A-Z]+)$|.*\.\d{4}\.BDrip\.([A-Z][a-z]+[A-Z][a-z]+)$|.*(?:-AC3|\.[xX][vV][iI][dD]|\.dxva)\.([a-z0-9]+|[A-Zi0-9]+|[A-Z][a-z]+[A-Z])$|.+/g;
+  const groupBlacklist = ['xvid', 'x264', 'x265', 'avc', 'hevc', 'dvd', 'dvd5', 'dvd9', 'dvdiso', 'dvd-r', 'dvdr', 'movie', '4k', '2160p', '1080p', '720p', '576p', '480p', '2160', '1080', '720', '576', '480', 'bluray', 'bdmv', 'bdiso', 'proper', 'aac', 'ac3', 'flac', 'vob', 'ifo', 'vob ifo', 'vob.ifo', 'vob_ifo', 'avi', 'remux', 'uncut', 'dl', 'us', 'r', 'j', 'jp', 'jpn', 'ita', 'dvdrip', 'pal', 'ntsc', 'bd', 'bdremux', 'bdremux.1080p', '1080p remux', 'hd', 'eng', 'exclusive', 'japanese', 'nogrp', 'nogroup', '3d half sbs', 'r1', 'r2', 'r2j', 'extras', 'trailers', 'rifftrax', 'cd1', 'cd2']
+  const groupRegex = /^\[(?!Japanese)(?:[0-9]+[pP]?|MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|([^[\u4E00-\u9FCC¶^\]]+))\](?!\[).*|^\[(?!Japanese)(?:MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|\d{6}|([^½ \]\u4E00-\u9FCC]+))\].*|.*[a-zA-Z .\]]\[(?:.* Edition|[rR]iff[tT]rax|REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|R).*|BD(?:MV|\d+)|AC3|AAC|.* DVD|[0-9]+[pP]?|.*?26[45]+.*?|[a-f0-9]{8}|[A-F0-9]{8}|.*FLAC|R2[ JFD].*|([^[)+-]+))](?:\[[0-9]+[pP]])$|.*(?:\.|[xhXH]\.?26[45] )(?:REMUX|PROPER|MOVIE|DVD(?:[95]|ISO|-?R)?|BD(?:MV|\d+)|AC3|AAC|FLAC|PAL|NTSC|XVID|DTS|DUB|[xhXH]\.?26[45]|(?![cC][dD]\d|BLURAY)([A-Z]-)?([A-Z][A-Zi0-9]+|[A-Z][a-z][A-Z]|@[a-zA-Z]{2,}))$|^(lazers|neroz)-[a-z0-9-]+$|^([a-z]{3,4}|refined|publichd)(?:-[a-z0-9-]*|(?:\.EXTRAS)?\.[a-z0-9.]*)\.?(?:2160|1080|720|480)p?$|.*(?:WEB-DL|10-bit|(?:_-_|(?:[ \d]- )(?!DTS-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|WB|[xhXH]\.?26[45]|[aA][vV][iI]|Uncut|Untouched|DVDRIP|Extras|Trailers|Copy|[rR]iff[tT]rax|[a-z]*1080p|[([]?\d+|[bB][iI]|[cC][dD]\d|([^ .\])_~]+)))\)?$|.*(?:WEB-DL|10-bit|(?:_-_|(?:-([A-Z][A-Z0-9]-)|...-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|[xhXH]\.?26[45]|Uncut|Untouched|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|([^ .\])]+)))-Exclusive\)?$|.*(?:[bB]lu-[rR]ay|WEB-DL|10-bit|(?:_-_|(?:S-([A-WYZ][A-Z0-9]?-)|[^S]-([A-Z][A-Z0-9]?-)|(FTW-)|.(?!BD-[JKR][)\]]?$).(?!3-D$).-))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|X|[xhXH]\.?26[45]|Uncut|Untouched|[mM]ovie|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|\[([A-Z]+|[a-z]+)]|((?:[A-Z]\.?)+|[^ .\])]+(?:\[\d+])?)))\)?$|.*(?:[bB]lu-[rR]ay|WEB-DL|10-bit|(?:_-_|(?:S-([A-WYZ][A-Z0-9]?-)|[^S]-([A-Z][A-Z0-9]?-)|(FTW-)|.(?!BD-[JKR][)\]]?$).(?!3-D$).-|~))(?:\d+|[0-9]+[pP]?|PROPER|OU|J(?:PN?)?|US|R|X|[xhXH]\.?26[45]|Uncut|Untouched|[mM]ovie|[a-z]*1080p|.*_3D_([A-Z]{4,})$|.*DVD(?:[95]|ISO|-?R)?|[bB][iI]|Live_In_.*|\[([A-Z]+|[a-z]+)]|((?:[A-Z]\.?)+|[^ .\])]+(?:\[\d+])?)))\)?$|^[a-z]{3}_\[(?:[0-9]+[pP]?|MOVIE|DVD(?:[95]|ISO|-?R)?|BDMV|([^[\u4E00-\u9FCC]+))\]|^([a-z]{2,3})\..*|.*?(?:\[((?:[A-Z]{3}-)?[A-Z][a-z]{3,})\]) ?\[(?:[a-f0-9]{8}|[A-F0-9]{8})]$|(?!DVD-R).*[a-zA-Z .\]]\[(?:.* Edition|[rR]iff[tT]rax|REMUX|PROPER|MOVIE|PAL|(?:PAL.)?DVD(?:[95]|ISO|R).*|BD(?:MV|\d+)|AC3|AAC|.* DVD|[0-9]+[pP]?|.*?26[45]+.*?|[a-f0-9]{8}|[A-F0-9]{8}|.*FLAC|Eng|Ita|R\d(?:J|FR)?|.*DVD\.XviD|VOB.IFO|R2[ JFD].*|EXTRAS.*|\d+p [rR]emux|.*, \d{4}|([^[)+-]+))]$|^([a-z]+)-.*(?:[0-9]+[pP]?$)|^[a-z]{2}-([a-z]{3})$|^(?:[A-Z_]|3D)+_(?:REMUX|BLURAY|([A-Zi]{2,4}HD|HD[A-Z]{4}))$|.*\d\.\d ([a-z]{4}|[A-Z][a-z]+[A-Z]+)$|.*\.\d{4}\.BDrip\.([A-Z][a-z]+[A-Z][a-z]+)$|.*(?:-AC3|\.[xX][vV][iI][dD]|\.dxva)\.([a-z0-9]+|[A-Zi0-9]+|[A-Z][a-z]+[A-Z])$|.+/g
   const groupName = filename.replace(/\.[^/.]+$/, '').trim().replace('DTS-HD-', '-').replace(groupRegex, '$1$2$3$4$5$6$7$8$9$10$11$12$13$14$15$16$17$18$19$20$21$22$23$24$25$26$27$28$29$30$31$32$33')
   return (groupName && groupName.length > 0 && !groupBlacklist.includes(groupName.toLowerCase())) ? groupName : filename
 }
 
-function fileList() {
+function fileList () {
   const flist = document.getElementById('filelist')
   for (const hash in diffFiles) {
     if (document.getElementById('file-' + hash)) continue
@@ -254,7 +256,7 @@ function toggleFile (hash: string, info: HTMLElement) {
   } else {
     showStatus('Only two files can be compared, deselect one first.')
     info.classList.remove('denied')
-    void info.offsetWidth // restart the shake animation
+    info.getBoundingClientRect() // force a reflow so the shake animation restarts
     info.classList.add('denied')
     return
   }
@@ -325,7 +327,7 @@ function renderFileOptions () {
   })
 }
 
-function diffUpdate() {
+function diffUpdate () {
   renderFileOptions()
   if (!diffOptions.fileA || !diffOptions.fileB) {
     document.getElementById('diff').innerHTML = ''
@@ -337,82 +339,36 @@ function diffUpdate() {
   const linesB = handleLines(diffFiles[diffOptions.fileB].data, { ...diffOptions, excludedStyles: diffOptions.excludedStyles[diffOptions.fileB] || [], replace: diffOptions.replacements[diffOptions.fileB] || {} })
   const titleA = diffFiles[diffOptions.fileA].title || diffFiles[diffOptions.fileA].filename || 'A'
   const titleB = diffFiles[diffOptions.fileB].title || diffFiles[diffOptions.fileB].filename || 'B'
-  if (linesA.length == 0) {
+  if (linesA.length === 0) {
     document.getElementById('diff').textContent = 'File "' + titleA + '" is empty after filtering.'
     document.getElementById('afterdiff').style.display = 'none'
     return
-  } else if (linesB.length == 0) {
+  } else if (linesB.length === 0) {
     document.getElementById('diff').textContent = 'File "' + titleB + '" is empty after filtering.'
     document.getElementById('afterdiff').style.display = 'none'
     return
   }
-  const diff = difflib.unifiedDiff(linesA, linesB, {fromfile: titleA, tofile: titleB, lineterm: ''}).join('\n')
-  if (diff.trim() === '') {
+  if (linesA.length === linesB.length && linesA.every((l, i) => l === linesB[i])) {
     document.getElementById('diff').textContent = 'No changes between ' + titleA + ' and ' + titleB + '.'
     document.getElementById('afterdiff').style.display = 'none'
     return
   }
-  const diff2htmlUi = new Diff2HtmlUI(document.getElementById('diff'), diff, { matching: diffOptions.diffMatching, outputFormat: diffOptions.diffOutputFormat, drawFileList: false, fileContentToggle: false, highlight: false });
-  diff2htmlUi.draw();
+  // Trailing newline on both sides so jsdiff doesn't add "\ No newline at end of file" markers
+  const diff = createTwoFilesPatch(titleA, titleB, linesA.join('\n') + '\n', linesB.join('\n') + '\n', undefined, undefined, { context: 3 })
+  const diffEl = document.getElementById('diff')
+  diffEl.innerHTML = diffToHtml(diff, { matching: diffOptions.diffMatching, outputFormat: diffOptions.diffOutputFormat, drawFileList: false })
+  syncSideScroll(diffEl)
   document.querySelectorAll('.d2h-code-side-line, .d2h-code-line').forEach(line => {
     const oline = line.innerHTML
     let nline = oline
     if (diffOptions.ignorePunctuation) {
-      nline = nline.replace(/<(?:del[^>]*|ins[^>]*)>([ .,\/#!$%\^&\*;:{}=\-_`'~()…?–—])<\/(?:del|ins)>/g, '$1')
+      nline = nline.replace(/<(?:del[^>]*|ins[^>]*)>([ .,/#!$%^&*;:{}=\-_`'~()…?–—])<\/(?:del|ins)>/g, '$1')
     }
     if (diffOptions.ignoreHonorifics) {
       nline = nline.replace(/<(?:del[^>]*|ins[^>]*)>-(san|sama|kun|chan|tan|senpai|sensei|kohai|hakase|neechan|oneesan|oneesama|oneechan|onichan|onisan|obasan|oobasan|neesan|aneki|aniki|zeki|han|niichan|dono|ojosama|niisan|oniisama|ojisan|nee|nii)<\/(?:del|ins)>/g, '-$1')
     }
-    nline = nline.replace(/<\/(?:del|ins)>([ .,\/#!$%\^&\*;:{}=\-_`'~()…?–—])<(?:del[^>]*|ins[^>]*)>/g, '$1').replace(/([ '])<\/(del|ins)>/g, '</$2>$1')
-    if (nline != oline) line.innerHTML = nline
-  })
-  document.querySelectorAll('.d2h-file-side-diff:first-child .d2h-diff-tbody > tr .d2h-code-side-linenumber, .d2h-file-diff .d2h-diff-tbody > tr .d2h-code-linenumber').forEach(lineNumber => {
-    lineNumber.addEventListener('click', e => {
-      const line = Array.from(lineNumber.parentNode.parentNode.children).indexOf(lineNumber.parentNode)
-      if (e.shiftKey) {
-        const selCur = document.querySelectorAll('.d2h-file-side-diff:first-child tr.highlight, .d2h-file-diff tr.highlight')
-        const selStart = selCur[0]
-        if (selStart) {
-          const selEnd = selCur[selCur.length - 1]
-          const selStartI = Array.from(selStart.parentNode.children).indexOf(selStart)
-          const selEndI = Array.from(selEnd.parentNode.children).indexOf(selEnd)
-          Array.from(document.querySelector('.d2h-file-side-diff:first-child .d2h-diff-tbody, .d2h-file-diff .d2h-diff-tbody').children).slice(Math.min(line, selStartI), Math.max(line, selEndI)+1).forEach(sel => sel.classList.add('highlight'))
-          if (diffOptions.diffOutputFormat === 'side-by-side') {
-            Array.from(document.querySelector('.d2h-file-side-diff:last-child .d2h-diff-tbody').children).slice(Math.min(line, selStartI), Math.max(line, selEndI)+1).forEach(sel => sel.classList.add('highlight'))
-          }
-        }
-      } else {
-        const highlights = document.querySelectorAll('.d2h-diff-tbody > tr.highlight')
-        highlights.forEach(l => l.classList.remove('highlight'))
-        if (highlights.length === (diffOptions.diffOutputFormat === 'side-by-side' ? 2 : 1) && highlights[0] == e.target.parentNode) return
-      }
-      lineNumber.parentNode.classList.add('highlight')
-      if (diffOptions.diffOutputFormat === 'side-by-side') {
-        document.querySelector('.d2h-file-side-diff:last-child .d2h-diff-tbody').children[line].classList.add('highlight')
-      }
-    })
-  })
-  document.querySelectorAll('.d2h-file-side-diff:last-child .d2h-diff-tbody > tr .d2h-code-side-linenumber').forEach(lineNumber => {
-    lineNumber.addEventListener('click', e => {
-      const line = Array.from(lineNumber.parentNode.parentNode.children).indexOf(lineNumber.parentNode)
-      if (e.shiftKey) {
-        const selCur = document.querySelectorAll('.d2h-file-side-diff:first-child tr.highlight')
-        const selStart = selCur[0]
-        if (selStart) {
-          const selEnd = selCur[selCur.length - 1]
-          const selStartI = Array.from(selStart.parentNode.children).indexOf(selStart)
-          const selEndI = Array.from(selEnd.parentNode.children).indexOf(selEnd)
-          Array.from(document.querySelector('.d2h-file-side-diff:first-child .d2h-diff-tbody').children).slice(Math.min(line, selStartI), Math.max(line, selEndI)+1).forEach(sel => sel.classList.add('highlight'))
-          Array.from(document.querySelector('.d2h-file-side-diff:last-child .d2h-diff-tbody').children).slice(Math.min(line, selStartI), Math.max(line, selEndI)+1).forEach(sel => sel.classList.add('highlight'))
-        }
-      } else {
-        const highlights = document.querySelectorAll('.d2h-diff-tbody > tr.highlight')
-        highlights.forEach(l => l.classList.remove('highlight'))
-        if (highlights.length === (diffOptions.diffOutputFormat === 'side-by-side' ? 2 : 1) && highlights[highlights.length - 1] == e.target.parentNode) return
-      }
-      lineNumber.parentNode.classList.add('highlight')
-      document.querySelector('.d2h-file-side-diff:first-child .d2h-diff-tbody').children[line].classList.add('highlight')
-    })
+    nline = nline.replace(/<\/(?:del|ins)>([ .,/#!$%^&*;:{}=\-_`'~()…?–—])<(?:del[^>]*|ins[^>]*)>/g, '$1').replace(/([ '])<\/(del|ins)>/g, '</$2>$1')
+    if (nline !== oline) line.innerHTML = nline
   })
   document.querySelectorAll('.d2h-ins:not(.d2h-change) .d2h-code-line-ctn').forEach(emptyLine => {
     emptyLine.innerHTML = '<ins>' + emptyLine.innerHTML + '</ins>'
@@ -423,48 +379,101 @@ function diffUpdate() {
   document.getElementById('afterdiff').style.display = 'block'
 }
 
-// Returns false if the data couldn't be parsed as subtitles (true for duplicates, which are just skipped)
-function addSubtitle(filename, index, data, format=null, title=null, name=null): boolean {
-  if (!title) title = guessGroup(filename)
-  if (name === title) name = null
-  if (name && name.includes(title) && name.includes('(')) {
-    title = name
-    name = null
+// Side by side: scrolling one pane horizontally scrolls the other (what Diff2HtmlUI's synchronisedScroll did)
+function syncSideScroll (container: HTMLElement) {
+  const sides = Array.from(container.querySelectorAll<HTMLElement>('.d2h-file-side-diff'))
+  if (sides.length !== 2) return
+  sides.forEach((side, i) => {
+    const other = sides[1 - i]
+    side.addEventListener('scroll', () => {
+      if (other.scrollLeft !== side.scrollLeft) other.scrollLeft = side.scrollLeft
+    })
+  })
+}
+
+// Clicking a line number highlights that row in both panes; shift+click extends the
+// highlight into a range, clicking the only highlighted row again clears it.
+// One delegated listener, so nothing has to be re-bound after each re-render.
+document.getElementById('diff').addEventListener('click', (e: MouseEvent) => {
+  const cell = (e.target as Element).closest('.d2h-code-side-linenumber, .d2h-code-linenumber')
+  if (!cell) return
+  const row = cell.parentElement
+  const line = Array.from(row.parentElement.children).indexOf(row)
+  // One tbody in the unified layout, two (left and right) side by side
+  const tbodies = Array.from(document.querySelectorAll('#diff .d2h-diff-tbody'))
+  const rowsAt = (i: number) => tbodies.map(tbody => tbody.children[i]).filter(Boolean)
+  const highlighted = Array.from(tbodies[0].children)
+    .map((r, i) => r.classList.contains('highlight') ? i : -1)
+    .filter(i => i >= 0)
+
+  if (e.shiftKey && highlighted.length > 0) {
+    const from = Math.min(line, highlighted[0])
+    const to = Math.max(line, highlighted[highlighted.length - 1])
+    for (let i = from; i <= to; i++) rowsAt(i).forEach(r => r.classList.add('highlight'))
+    return
   }
 
+  const wasOnlyThisLine = highlighted.length === 1 && highlighted[0] === line
+  tbodies.forEach(tbody => Array.from(tbody.children).forEach(r => r.classList.remove('highlight')))
+  if (!wasOnlyThisLine) rowsAt(line).forEach(r => r.classList.add('highlight'))
+})
+
+// Fast non-cryptographic 53-bit hash (cyrb53), only used to skip files that were already added
+function hashString (str: string): string {
+  let h1 = 0xdeadbeef
+  let h2 = 0x41c6ce57
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i)
+    h1 = Math.imul(h1 ^ ch, 2654435761)
+    h2 = Math.imul(h2 ^ ch, 1597334677)
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909)
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909)
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16) + str.length.toString(16)
+}
+
+// Returns false if the data couldn't be parsed as subtitles (true for duplicates, which are just skipped)
+function addSubtitle (filename: string, data: string, title: string = null): boolean {
   // TODO: (specifically for clipboard) parse ASS title section
+  if (!title) title = guessGroup(filename)
 
-  const fileIndex = filename.match(/_(?:Track)?(\d+)\.[A-Za-z]{3}$/)
-  const hash = crypto.createHash('sha1').update(data).digest('hex')
+  // Files extracted from a container are often named like "Show_Track3.ass"
+  const trackIndex = filename.match(/_(?:Track)?(\d+)\.[A-Za-z]{3}$/)
+  if (trackIndex) title += '_' + parseInt(trackIndex[1])
 
+  const hash = hashString(data)
   if (diffFiles[hash]) return true
 
+  let format
   let parsed
   try {
-    if (!format) format = subsrt.detect(data)
+    format = subsrt.detect(data)
     if (!format) return false
-    parsed = subsrt.parse(data, {format: format})
+    parsed = subsrt.parse(data, { format })
   } catch (error) {
     console.error(error)
     return false
   }
 
-  if (!parsed || parsed.length == 0) return false
+  if (!parsed || parsed.length === 0) return false
+
+  // Keep titles unique, they label the two sides of the diff
+  const titles = Object.keys(diffFiles).map(f => diffFiles[f].title)
+  let uniqueTitle = title
+  for (let n = 2; titles.includes(uniqueTitle); n++) uniqueTitle = title + ' (' + n + ')'
 
   diffFiles[hash] = {
-    filename: filename,
-    format: format,
+    filename,
+    format,
     data: parsed,
     styles: collectStyles(parsed),
-    title: (index > 1 && Object.keys(diffFiles).some(f => diffFiles[f].title === (name ? title + ' (' + name + ')' : title)) && !name) ? title + '_' + index : (fileIndex && !name) ? title + '_' + parseInt(fileIndex[1]) : name ? title + ' (' + name + ')' : title
+    title: uniqueTitle
   }
 
   fileList()
 
-  if (!diffOptions.fileA) {
-    document.getElementById('file-'+hash).click()
-  } else if (!diffOptions.fileB) {
-    document.getElementById('file-'+hash).click()
+  if (!diffOptions.fileA || !diffOptions.fileB) {
+    document.getElementById('file-' + hash).click()
   }
   return true
 }
@@ -477,7 +486,7 @@ document.addEventListener('paste', (e: ClipboardEvent) => {
   const paste = e.clipboardData ? e.clipboardData.getData('text') : ''
   if (paste.trim() === '') return
 
-  if (!addSubtitle('clipboard', 0, paste, null, 'Clipboard content')) {
+  if (!addSubtitle('clipboard', paste, 'Clipboard content')) {
     showStatus("Clipboard content isn't a recognized subtitle format.")
   }
 })
@@ -508,9 +517,7 @@ async function handleFiles (event: Event) {
 
     try {
       if (/\.(ass|ssa|srt|vtt|txt)$/.test(normalized)) {
-        if (!addSubtitle(filename, 0, await file.text())) failed.push(filename)
-      } else if (/\.(mkv|mks)$/.test(normalized)) {
-        if (await extractMkvSubtitles(file) === 0) failed.push(filename + ' (no subtitle tracks)')
+        if (!addSubtitle(filename, await file.text())) failed.push(filename)
       } else {
         failed.push(filename + ' (unsupported type)')
       }
@@ -528,74 +535,4 @@ async function handleFiles (event: Event) {
   } else {
     showStatus('Done.', 2000)
   }
-}
-
-// Reads every subtitle track out of an mkv/mks file and adds them.
-// Resolves with the number of tracks added, rejects if the file can't be parsed.
-function extractMkvSubtitles (file: File): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const filename = file.name
-    const fileStream = fileReaderStream(file, { chunkSize: 2 * 1024 * 1024 })
-    const parser = new SubtitleParser()
-    const subs = {}
-    let settled = false
-
-    const settle = (error?: Error) => {
-      if (settled) return
-      settled = true
-      fileStream.destroy?.()
-      parser.destroy?.()
-      if (error) {
-        reject(error)
-        return
-      }
-
-      let added = 0
-      for (const index in subs) {
-        const sub = subs[index]
-        if (sub.type === 'ass' || sub.type === 'ssa') {
-          const header = sub.header.split(/(^\[Events\](?:\s+(?!\[).*)*\s*)/m)
-          header.splice(2, 0, sub.data)
-          sub.data = header.join('')
-        }
-        const format = sub.type === 'utf8' ? 'srt' : sub.type === 'webvtt' ? 'vtt' : sub.type
-        if (addSubtitle(filename, Number(index), sub.data, format, null, sub.name)) added++
-      }
-      resolve(added)
-    }
-
-    parser.once('tracks', tracks => {
-      tracks.forEach(track => {
-        subs[track.number] = {type: track.type, count: 0, name: track.name, data: '', header: track.header}
-      })
-      if (!tracks.length) settle() // nothing to extract, stop reading the file
-    })
-
-    parser.on('subtitle', (subtitle, trackNumber) => {
-      const sub = subs[trackNumber]
-      if (!sub) return
-      sub.count += 1
-      if (sub.type == 'utf8' || sub.type == 'webvtt') {
-        sub.data += '\r\n' + sub.count
-      }
-      sub.data += '\r\n' + subtitle.content
-    })
-
-    parser.once('finish', () => settle())
-    // Stream errors are async, a try/catch around pipe() wouldn't see them
-    parser.on('error', settle)
-    fileStream.on('error', settle)
-
-    fileStream.pipe(parser)
-  })
-}
-
-function formatDuration (duration) {
-  duration = Math.round(duration)
-  if (duration < 2) return 'few seconds'
-  if (duration < 58) return duration + ' seconds'
-  if (duration < 120) return '1 minute'
-  if (duration < 3598) return Math.floor(duration / 60) + ' minutes'
-  if (duration < 7200) return '2 hours'
-  return Math.floor(duration / 3600) + ' hours'
 }
