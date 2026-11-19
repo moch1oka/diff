@@ -277,9 +277,14 @@ export async function exportDiffImage (diffEl: HTMLElement, selectionOnly: boole
     return { cells, lines, height: lineCount * lineHeight + PAD_Y * 2 }
   })
 
-  // Always at least 2x: a 1x image looks soft as soon as anything zooms or rescales it.
-  // Diffs too tall for one canvas at that scale are split into several images.
-  const scale = Math.max(2, Math.min(3, window.devicePixelRatio || 1))
+  // 2x (or the screen's ratio if higher): a 1x image looks soft as soon as anything rescales it.
+  // Browsers can't make a canvas taller than ~32k px, so a very long diff is drawn at a
+  // slightly lower scale to still fit in one image; it's only split when even 1x won't fit.
+  const preferredScale = Math.max(2, Math.min(3, window.devicePixelRatio || 1))
+  const totalHeight = HEADER_HEIGHT + rows.reduce((sum, r) => sum + r.height, 0) + 1
+  const scale = totalHeight * preferredScale <= MAX_CANVAS_HEIGHT
+    ? preferredScale
+    : Math.max(1, Math.floor(MAX_CANVAS_HEIGHT / totalHeight * 100) / 100)
   const maxRowsHeight = Math.floor(MAX_CANVAS_HEIGHT / scale) - HEADER_HEIGHT - 1
   const parts: LaidOutRow[][] = [[]]
   let partHeight = 0
