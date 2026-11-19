@@ -18,10 +18,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Parcel 1 (and its native deps like deasync) don't build on recent Node versions
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 16
           cache: npm
@@ -32,7 +32,9 @@ jobs:
           git config --global url."https://github.com/".insteadOf ssh://git@github.com/
           git config --global --add url."https://github.com/".insteadOf git@github.com:
 
-      - run: npm ci
+      # Not `npm ci`: the committed lock file is slightly out of sync with package.json
+      # (missing nan), which npm ci rejects. npm install keeps the locked versions and fills the gap.
+      - run: npm install --no-audit --no-fund
       - run: npm run build
 
       - uses: actions/configure-pages@v5
