@@ -8,6 +8,18 @@ import type { LineMatchingType, OutputFormatType } from 'diff2html/lib/types'
 import 'diff2html/bundles/css/diff2html.min.css'
 import './main.css' // after diff2html's CSS so our overrides win
 
+// A different footer line on every visit
+const taglines = [
+  'Built for people who lose sleep over a missing comma.',
+  'Two subs walk into a diff. Only one of them spelled it right.',
+  'Somewhere, a translator is still deciding between "senpai" and "upperclassman".',
+  'QC: finding the typo five minutes after the release since forever.',
+  'If both versions are wrong, at least now you know exactly where.',
+  'Timing is everything. Except here, where only the words count.',
+  'No line left behind. No comma left unjudged.'
+]
+document.getElementById('tagline').textContent = taglines[Math.floor(Math.random() * taglines.length)]
+
 const exportAllBtn = document.getElementById('export-all') as HTMLButtonElement
 const exportSelectionBtn = document.getElementById('export-selection') as HTMLButtonElement
 let exporting = false

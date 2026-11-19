@@ -39,6 +39,8 @@ const PAD_Y = 3
 const NUM_PAD = 8
 const HEADER_HEIGHT = 36
 const MAX_CANVAS_HEIGHT = 30000 // device px; browsers cap canvas height around 32k
+const MIN_TEXT_WIDTH = 360 // CSS px per side
+const MAX_TEXT_WIDTH = 640 // longer lines wrap
 
 function isTransparent (color: string): boolean {
   return !color || color === 'transparent' || /rgba\(.*,\s*0\)$/.test(color)
@@ -239,9 +241,6 @@ export async function exportDiffImage (diffEl: HTMLElement, selectionOnly: boole
   const measureNum = measureWith(numFont)
 
   const sides = tbodies.length
-  const screenWidth = wrapper ? wrapper.clientWidth : 1200
-  const width = Math.round(Math.min(1600, Math.max(900, screenWidth)))
-  const sideWidth = width / sides
   // Plain loops: Math.max(...hugeArray) overflows the call stack on very long diffs
   let numsPerCell = 1
   let widestNum = measureNum('0000')
@@ -252,22 +251,36 @@ export async function exportDiffImage (diffEl: HTMLElement, selectionOnly: boole
   const numColWidth = Math.ceil(widestNum) + NUM_PAD
   const numWidth = numColWidth * numsPerCell + NUM_PAD
   const prefixWidth = Math.ceil(measureCode('+')) + 4
-  const textWidth = sideWidth - numWidth - PAD_X * 2 - prefixWidth
+
+  // Size the columns to the text instead of the browser window: subtitle lines are short,
+  // and a wide, mostly empty image gets shrunk (and blurred) by whatever displays it.
+  let longestText = 0
+  for (const cells of cellsPerRow) {
+    for (const cell of cells) {
+      if (cell.info) continue
+      let w = 0
+      for (const piece of cell.pieces) w += measureCode(piece.text)
+      longestText = Math.max(longestText, w)
+    }
+  }
+  const textWidth = Math.ceil(Math.min(MAX_TEXT_WIDTH, Math.max(MIN_TEXT_WIDTH, longestText)))
+  let sideWidth = numWidth + PAD_X * 2 + prefixWidth + textWidth
+  // Room for the title in the header
+  measureCanvas.font = `bold ${titleStyle.fontSize} ${titleStyle.fontFamily}`
+  const titleWidth = measureCanvas.measureText(title + '  (00/00)').width + PAD_X * 2 + 4
+  if (sideWidth * sides < titleWidth) sideWidth = titleWidth / sides
+  const width = Math.ceil(sideWidth * sides)
 
   const rows: LaidOutRow[] = cellsPerRow.map(cells => {
-    const lines = cells.map(cell => wrapPieces(cell.pieces, cell.info ? sideWidth - numWidth - PAD_X * 2 : textWidth, measureCode))
+    const lines = cells.map(cell => wrapPieces(cell.pieces, cell.info ? sideWidth - numWidth - PAD_X * 2 : sideWidth - numWidth - PAD_X * 2 - prefixWidth, measureCode))
     const lineCount = Math.max(1, ...lines.map(l => l.length))
     return { cells, lines, height: lineCount * lineHeight + PAD_Y * 2 }
   })
 
-  // Split into several images if one would exceed the browser's canvas limits
-  // Match the screen's sharpness (1x-2x); a fixed 2x made full-episode PNGs 10+ MB
-  const preferredScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1))
-  const totalHeight = HEADER_HEIGHT + rows.reduce((sum, r) => sum + r.height, 0) + 1
-  const scale = totalHeight * preferredScale <= MAX_CANVAS_HEIGHT
-    ? preferredScale
-    : Math.max(1, MAX_CANVAS_HEIGHT / totalHeight)
-  const maxRowsHeight = Math.floor(MAX_CANVAS_HEIGHT / scale + 1e-6) - HEADER_HEIGHT - 1
+  // Always at least 2x: a 1x image looks soft as soon as anything zooms or rescales it.
+  // Diffs too tall for one canvas at that scale are split into several images.
+  const scale = Math.max(2, Math.min(3, window.devicePixelRatio || 1))
+  const maxRowsHeight = Math.floor(MAX_CANVAS_HEIGHT / scale) - HEADER_HEIGHT - 1
   const parts: LaidOutRow[][] = [[]]
   let partHeight = 0
   for (const row of rows) {

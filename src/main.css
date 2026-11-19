@@ -68,14 +68,39 @@ h2 {
   outline: none;
 }
 
-.info, #diff {
-  margin: 1em auto 33vh;
+#diff {
+  margin: 1em auto 0;
   text-align: center;
+  /* Fill the window instead of growing with the longest line, which made the whole page scroll sideways */
+  width: 100%;
+  max-width: 1800px;
+  padding: 0 1em;
+  box-sizing: border-box;
+}
+
+/* Only show a scrollbar under a pane when its lines actually overflow */
+#diff .d2h-file-side-diff {
+  overflow-x: auto;
 }
 
 .info {
-  padding-bottom: 2em;
+  /* auto top margin: sits at the bottom of the window when the page is short */
+  margin: auto auto 0;
+  padding: 3em 1em 2em;
   max-width: 70em;
+  text-align: center;
+  font-size: small;
+  line-height: 1.6;
+}
+
+.info .tagline {
+  font-size: 1.15em;
+  font-style: italic;
+  margin-bottom: 0.4em;
+}
+
+.info .meta {
+  opacity: 0.7;
 }
 
 .info a {
