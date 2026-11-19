@@ -242,8 +242,14 @@ export async function exportDiffImage (diffEl: HTMLElement, selectionOnly: boole
   const screenWidth = wrapper ? wrapper.clientWidth : 1200
   const width = Math.round(Math.min(1600, Math.max(900, screenWidth)))
   const sideWidth = width / sides
-  const numsPerCell = Math.max(1, ...cellsPerRow.map(cells => cells[0].nums.length))
-  const numColWidth = Math.ceil(Math.max(measureNum('0000'), ...cellsPerRow.flatMap(cells => cells.flatMap(c => c.nums.map(measureNum))))) + NUM_PAD
+  // Plain loops: Math.max(...hugeArray) overflows the call stack on very long diffs
+  let numsPerCell = 1
+  let widestNum = measureNum('0000')
+  for (const cells of cellsPerRow) {
+    numsPerCell = Math.max(numsPerCell, cells[0].nums.length)
+    for (const cell of cells) for (const n of cell.nums) widestNum = Math.max(widestNum, measureNum(n))
+  }
+  const numColWidth = Math.ceil(widestNum) + NUM_PAD
   const numWidth = numColWidth * numsPerCell + NUM_PAD
   const prefixWidth = Math.ceil(measureCode('+')) + 4
   const textWidth = sideWidth - numWidth - PAD_X * 2 - prefixWidth

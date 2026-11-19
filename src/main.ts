@@ -360,6 +360,8 @@ function renderFileOptions () {
   })
 }
 
+const diffCache = { patchKey: '', patch: '', htmlKey: '', html: '' }
+
 function diffUpdate () {
   renderFileOptions()
   if (!diffOptions.fileA || !diffOptions.fileB) {
@@ -386,12 +388,25 @@ function diffUpdate () {
     document.getElementById('afterdiff').style.display = 'none'
     return
   }
+  // Diffing and rendering are the slow parts on big files (seconds for thousands of changed
+  // lines), so reuse them when an option only changes the presentation (layout, ignore*...)
   // Trailing newline on both sides so jsdiff doesn't add "\ No newline at end of file" markers
-  const diff = createTwoFilesPatch(titleA, titleB, linesA.join('\n') + '\n', linesB.join('\n') + '\n', undefined, undefined, { context: 3 })
+  const patchKey = titleA + '\u0000' + titleB + '\u0000' + linesA.join('\n') + '\n\u0000' + linesB.join('\n') + '\n'
+  if (patchKey !== diffCache.patchKey) {
+    diffCache.patchKey = patchKey
+    diffCache.patch = createTwoFilesPatch(titleA, titleB, linesA.join('\n') + '\n', linesB.join('\n') + '\n', undefined, undefined, { context: 3 })
+    diffCache.htmlKey = ''
+  }
+  const htmlKey = diffOptions.diffMatching + '|' + diffOptions.diffOutputFormat
+  if (htmlKey !== diffCache.htmlKey) {
+    diffCache.htmlKey = htmlKey
+    diffCache.html = diffToHtml(diffCache.patch, { matching: diffOptions.diffMatching, outputFormat: diffOptions.diffOutputFormat, drawFileList: false })
+  }
   const diffEl = document.getElementById('diff')
-  diffEl.innerHTML = diffToHtml(diff, { matching: diffOptions.diffMatching, outputFormat: diffOptions.diffOutputFormat, drawFileList: false })
+  diffEl.innerHTML = diffCache.html
   syncSideScroll(diffEl)
-  document.querySelectorAll('.d2h-code-side-line, .d2h-code-line').forEach(line => {
+  // Word-level <del>/<ins> marks only exist in changed lines, so only those need touching up
+  document.querySelectorAll('td.d2h-change .d2h-code-side-line, td.d2h-change .d2h-code-line').forEach(line => {
     const oline = line.innerHTML
     let nline = oline
     if (diffOptions.ignorePunctuation) {
@@ -466,8 +481,37 @@ function hashString (str: string): string {
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16) + str.length.toString(16)
 }
 
+// subsrt only accepts "start --> end" followed directly by a line break, so cues with
+// WebVTT settings ("position:50% line:85%", common in Netflix/YouTube rips) or SRT
+// coordinates ("X1:100 X2:200 ...") were silently dropped. Cut whatever follows the end time.
+function normalizeTimingLines (data: string): string {
+  return data.replace(/^([ \t]*(?:\d+:)?\d{1,2}:\d{1,2}(?:[.,]\d{1,3})?[ \t]*-->[ \t]*(?:\d+:)?\d{1,2}:\d{1,2}(?:[.,]\d{1,3})?)[ \t]+[^\r\n]*$/gm, '$1')
+}
+
+// WebVTT text may contain entities (&amp; &lt; &nbsp; ...); subsrt decodes them for SRT only.
+// A <textarea> parses its content as plain text, so this can't create elements or run anything.
+const entityDecoder = document.createElement('textarea')
+function decodeEntities (text: string): string {
+  if (!text.includes('&')) return text
+  entityDecoder.innerHTML = text
+  return entityDecoder.value
+}
+
+// UTF-8 (with or without BOM) and UTF-16 with BOM; anything that isn't valid UTF-8 is
+// assumed to be an old Windows-1258 (Vietnamese ANSI) file instead of turning into "�".
+async function readSubtitleFile (file: File): Promise<{ text: string, encoding: string }> {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  if (bytes[0] === 0xFF && bytes[1] === 0xFE) return { text: new TextDecoder('utf-16le').decode(bytes), encoding: 'utf-16' }
+  if (bytes[0] === 0xFE && bytes[1] === 0xFF) return { text: new TextDecoder('utf-16be').decode(bytes), encoding: 'utf-16' }
+  try {
+    return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), encoding: 'utf-8' }
+  } catch {
+    return { text: new TextDecoder('windows-1258').decode(bytes), encoding: 'windows-1258' }
+  }
+}
+
 // Returns false if the data couldn't be parsed as subtitles (true for duplicates, which are just skipped)
-function addSubtitle (filename: string, data: string, title: string = null): boolean {
+function addSubtitle (filename: string, data: string, title: string = null, encoding = 'utf-8'): boolean {
   // TODO: (specifically for clipboard) parse ASS title section
   if (!title) title = guessGroup(filename)
 
@@ -481,15 +525,20 @@ function addSubtitle (filename: string, data: string, title: string = null): boo
   let format
   let parsed
   try {
-    format = subsrt.detect(data)
+    const normalized = normalizeTimingLines(data)
+    format = subsrt.detect(normalized)
     if (!format) return false
-    parsed = subsrt.parse(data, { format })
+    parsed = subsrt.parse(normalized, { format })
   } catch (error) {
     console.error(error)
     return false
   }
 
-  if (!parsed || parsed.length === 0) return false
+  // Only metadata (e.g. a WEBVTT header) and no actual lines: not usable
+  if (!parsed || !parsed.some(line => line.type === 'caption')) return false
+  if (format === 'vtt') {
+    parsed.forEach(line => { if (line.type === 'caption') line.text = decodeEntities(line.text) })
+  }
 
   // Keep titles unique, they label the two sides of the diff
   const titles = Object.keys(diffFiles).map(f => diffFiles[f].title)
@@ -498,7 +547,7 @@ function addSubtitle (filename: string, data: string, title: string = null): boo
 
   diffFiles[hash] = {
     filename,
-    format,
+    format: encoding === 'utf-8' ? format : format + ', ' + encoding,
     data: parsed,
     styles: collectStyles(parsed),
     title: uniqueTitle
@@ -514,7 +563,22 @@ function addSubtitle (filename: string, data: string, title: string = null): boo
 
 diffUpdate()
 
-input.addEventListener('change', handleFiles)
+input.addEventListener('change', async () => {
+  await loadFiles(Array.from(input.files))
+  input.value = '' // allow picking the same file again (e.g. after removing it)
+})
+
+// Dropping files anywhere on the page loads them, instead of the browser navigating
+// away to the file and losing everything that was loaded
+document.addEventListener('dragover', (e: DragEvent) => {
+  if (e.dataTransfer && e.dataTransfer.types.includes('Files')) e.preventDefault()
+})
+document.addEventListener('drop', (e: DragEvent) => {
+  if (e.target === input || !e.dataTransfer || e.dataTransfer.files.length === 0) return // the drop area's own input handles itself
+  e.preventDefault()
+  handleDropInactive()
+  loadFiles(Array.from(e.dataTransfer.files))
+})
 
 document.addEventListener('paste', (e: ClipboardEvent) => {
   const paste = e.clipboardData ? e.clipboardData.getData('text') : ''
@@ -537,9 +601,7 @@ function handleDropInactive () {
   droparea.classList.remove('is-active')
 }
 
-async function handleFiles (event: Event) {
-  const target = event.target as HTMLInputElement
-  const files = Array.from(target.files) // copy: resetting target.value below empties the FileList
+async function loadFiles (files: File[]) {
   const failed: string[] = []
 
   for (let fileIndex = 0; fileIndex < files.length; fileIndex++) {
@@ -551,7 +613,8 @@ async function handleFiles (event: Event) {
 
     try {
       if (/\.(ass|ssa|srt|vtt|txt)$/.test(normalized)) {
-        if (!addSubtitle(filename, await file.text())) failed.push(filename)
+        const { text, encoding } = await readSubtitleFile(file)
+        if (!addSubtitle(filename, text, null, encoding)) failed.push(filename)
       } else {
         failed.push(filename + ' (unsupported type)')
       }
@@ -560,9 +623,6 @@ async function handleFiles (event: Event) {
       failed.push(filename)
     }
   }
-
-  // Allow picking the same file again (e.g. after removing it)
-  target.value = ''
 
   if (failed.length > 0) {
     showStatus("Couldn't read: " + failed.join(', '), 8000)
